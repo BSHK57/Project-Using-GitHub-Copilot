@@ -4,9 +4,9 @@ import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 import io
-import sounddevice as sd
 from streamlit_option_menu import option_menu
 from st_audiorec import st_audiorec
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
 
 st.set_page_config(page_title="AI Multi-Feature App", layout="wide")
 
@@ -60,6 +60,23 @@ def record_audio(duration=10, fs=16000):
     if stop:
         st.warning("Stopped listening early.")
     return audio[:i*fs//10] if stop else audio
+
+def record_audio_webrtc():
+    class AudioProcessor(AudioProcessorBase):
+        def __init__(self):
+            self.frames = []
+        def recv(self, frame):
+            self.frames.append(frame.to_ndarray())
+            return frame
+    ctx = webrtc_streamer(key="audio", audio_receiver_size=1024, audio_processor_factory=AudioProcessor)
+    if ctx.audio_receiver:
+        st.info("Recording... Press Stop above to finish.")
+        while ctx.state.playing:
+            pass
+        # Concatenate all frames
+        audio_np = np.concatenate(ctx.audio_processor.frames, axis=0)
+        return audio_np, ctx.audio_receiver.get_audio_frame_rate()
+    return None, None
 
 # --- Face Recognition (with MediaPipe for webcam) ---
 if selected == "Face Recognition":
@@ -145,7 +162,7 @@ elif selected == "Hand Gesture Movement":
                 FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
         cap.release()
 
-# --- Speech to Text (use streamlit audio recorder) ---
+# --- Speech to Text (use streamlit_webrtc audio recorder) ---
 elif selected == "Speech to Text":
     st.header("Speech to Text Recognition")
     st.write("Record your voice and transcribe it. The waveform of your speech will be shown.")
@@ -153,20 +170,14 @@ elif selected == "Speech to Text":
     import tempfile
     import scipy.io.wavfile
     recognizer = sr.Recognizer()
-    audio_bytes = st_audiorec()
-    if audio_bytes is not None:
-        # Save audio to temp wav file
+    audio_np, fs = record_audio_webrtc()
+    if audio_np is not None:
+        buf = plot_waveform(audio_np, fs)
+        buf.seek(0)
+        st.image(buf.read(), caption='Audio Waveform', use_container_width=True)
+        # Save to temp wav file for recognition
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmpfile:
-            tmpfile.write(audio_bytes)
-            tmpfile.flush()
-            # Plot waveform
-            import wave
-            with wave.open(tmpfile.name, 'rb') as wf:
-                frames = wf.readframes(wf.getnframes())
-                audio_np = np.frombuffer(frames, dtype=np.int16)
-                buf = plot_waveform(audio_np, wf.getframerate())
-                buf.seek(0)
-                st.image(buf.read(), caption='Audio Waveform', use_container_width=True)
+            scipy.io.wavfile.write(tmpfile.name, fs, audio_np)
             with sr.AudioFile(tmpfile.name) as source:
                 audio_data = recognizer.record(source)
                 try:
