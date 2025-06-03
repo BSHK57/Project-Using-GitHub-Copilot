@@ -1,4 +1,3 @@
-opencv-python
 streamlit
 Pillow
 numpy
@@ -9,3 +8,5 @@ torch
 torchvision
 scipy
 streamlit-option-menu
+pipwin
+SpeechRecognition
