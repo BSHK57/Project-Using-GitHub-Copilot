@@ -165,7 +165,8 @@ elif selected == "Speech to Text":
                 frames = wf.readframes(wf.getnframes())
                 audio_np = np.frombuffer(frames, dtype=np.int16)
                 buf = plot_waveform(audio_np, wf.getframerate())
-                st.image(buf, caption='Audio Waveform', use_container_width=True)
+                buf.seek(0)
+                st.image(buf.read(), caption='Audio Waveform', use_container_width=True)
             with sr.AudioFile(tmpfile.name) as source:
                 audio_data = recognizer.record(source)
                 try:
@@ -194,18 +195,32 @@ elif selected == "Image Recognition":
         if template_gray.shape[0] > main_gray.shape[0] or template_gray.shape[1] > main_gray.shape[1]:
             st.error("Template image is larger than the main image. Please upload a smaller template.")
         else:
-            res = cv2.matchTemplate(main_gray, template_gray, cv2.TM_CCOEFF_NORMED)
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-            threshold = 0.6  # Lowered threshold for more realistic matching
-            found = max_val >= threshold
+            # Try multi-scale template matching for better robustness
+            best_val = -1
+            best_loc = None
+            best_scale = 1.0
             h, w = template_gray.shape
+            for scale in np.linspace(0.5, 1.5, 20):
+                resized = cv2.resize(template_gray, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
+                if resized.shape[0] > main_gray.shape[0] or resized.shape[1] > main_gray.shape[1]:
+                    continue
+                res = cv2.matchTemplate(main_gray, resized, cv2.TM_CCOEFF_NORMED)
+                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+                if max_val > best_val:
+                    best_val = max_val
+                    best_loc = max_loc
+                    best_scale = scale
+                    best_shape = resized.shape
+            threshold = 0.6
+            found = best_val >= threshold
             result_img = main_np.copy()
             if found:
-                top_left = max_loc
-                bottom_right = (top_left[0] + w, top_left[1] + h)
+                h_scaled, w_scaled = best_shape
+                top_left = best_loc
+                bottom_right = (top_left[0] + w_scaled, top_left[1] + h_scaled)
                 cv2.rectangle(result_img, top_left, bottom_right, (0,255,0), 3)
-                st.success(f"Template found in main image! Match confidence: {max_val*100:.2f}%")
+                st.success(f"Template found in main image! Match confidence: {best_val*100:.2f}% (scale={best_scale:.2f})")
             else:
-                st.error(f"Template NOT found in main image. Best match confidence: {max_val*100:.2f}%")
+                st.error(f"Template NOT found in main image. Best match confidence: {best_val*100:.2f}%")
             st.image([main_image, template_image], caption=["Main Image", "Template Image"], use_container_width=True)
             st.image(result_img, caption="Result (Green box = match)", use_container_width=True)
