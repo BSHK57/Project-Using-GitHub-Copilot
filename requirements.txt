@@ -1,4 +1,11 @@
-opencv-python-headless
+opencv-python
 streamlit
 Pillow
 numpy
+matplotlib
+sounddevice
+mediapipe
+torch
+torchvision
+scipy
+streamlit-option-menu
