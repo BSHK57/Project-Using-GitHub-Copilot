@@ -4,7 +4,7 @@ Pillow
 numpy
 matplotlib
 sounddevice
-mediapipe
+mediapipe==0.10.21
 torch
 torchvision
 scipy
