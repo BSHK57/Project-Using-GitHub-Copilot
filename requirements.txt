@@ -1,7 +1,7 @@
 streamlit==1.35.0
 opencv-python==4.9.0.80
 numpy==1.26.4
-Pillow==10.3.0
+
 matplotlib==3.8.4
 sounddevice==0.4.6
 mediapipe==0.10.21
@@ -11,3 +11,4 @@ scipy==1.13.0
 streamlit-option-menu==0.3.6
 SpeechRecognition==3.10.1
 st-audiorec==0.1.7
+Pillow==10.3.0
