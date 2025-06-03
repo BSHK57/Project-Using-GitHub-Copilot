@@ -5,7 +5,7 @@ Pillow
 matplotlib
 sounddevice
 streamlit-option-menu
-st-audiorec
+git+https://github.com/stefanrmmr/st-audiorec.git
 mediapipe
 SpeechRecognition
 scipy
