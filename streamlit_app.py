@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import io
 import sounddevice as sd
 from streamlit_option_menu import option_menu
+from st_audiorec import st_audiorec
 
 st.set_page_config(page_title="AI Multi-Feature App", layout="wide")
 
@@ -71,7 +72,7 @@ if selected == "Face Recognition":
             image_np = np.array(image.convert('RGB'))
             image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
             result_img, faces = detect_faces(image_cv)
-            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), caption=f"Detected {len(faces)} face(s)", use_column_width=True)
+            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), caption=f"Detected {len(faces)} face(s)", use_container_width=True)
     elif option == "Use Webcam (MediaPipe)":
         import mediapipe as mp
         mp_face = mp.solutions.face_detection
@@ -93,7 +94,7 @@ if selected == "Face Recognition":
                     if results.detections:
                         for detection in results.detections:
                             mp_drawing.draw_detection(frame, detection)
-                    FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
             cap.release()
 
 # --- Hand Gesture Movement (MediaPipe) ---
@@ -141,75 +142,70 @@ elif selected == "Hand Gesture Movement":
                     cv2.putText(frame, f'Total Fingers: {total_fingers}', (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
                 else:
                     cv2.putText(frame, 'Show your hands to the camera', (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
-                FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
         cap.release()
 
-# --- Speech to Text (fix error, use sounddevice fallback if needed) ---
+# --- Speech to Text (use streamlit audio recorder) ---
 elif selected == "Speech to Text":
     st.header("Speech to Text Recognition")
-    st.write("Click 'Start Listening' and speak. The waveform of your speech will be shown. Click 'Stop Listening' to end early.")
+    st.write("Record your voice and transcribe it. The waveform of your speech will be shown.")
     import speech_recognition as sr
     import tempfile
     import scipy.io.wavfile
     recognizer = sr.Recognizer()
-    duration = 10
-    fs = 16000
-    if st.button("Start Listening"):
-        try:
-            audio = record_audio(duration=duration, fs=fs)
-            audio_np = audio.flatten()
-            buf = plot_waveform(audio_np, fs)
-            st.image(buf, caption='Audio Waveform', use_column_width=True)
-            # Save to temp wav file for recognition
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmpfile:
-                scipy.io.wavfile.write(tmpfile.name, fs, audio)
-                with sr.AudioFile(tmpfile.name) as source:
-                    audio_data = recognizer.record(source)
-                    try:
-                        text = recognizer.recognize_google(audio_data)
-                        st.success(f"You said: {text}")
-                    except sr.UnknownValueError:
-                        st.error("Sorry, I could not understand the audio.")
-                    except sr.RequestError as e:
-                        st.error(f"Could not request results; {e}")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-        except Exception as e:
-            st.error(f"Microphone or audio error: {e}")
+    audio_bytes = st_audiorec()
+    if audio_bytes is not None:
+        # Save audio to temp wav file
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmpfile:
+            tmpfile.write(audio_bytes)
+            tmpfile.flush()
+            # Plot waveform
+            import wave
+            with wave.open(tmpfile.name, 'rb') as wf:
+                frames = wf.readframes(wf.getnframes())
+                audio_np = np.frombuffer(frames, dtype=np.int16)
+                buf = plot_waveform(audio_np, wf.getframerate())
+                st.image(buf, caption='Audio Waveform', use_container_width=True)
+            with sr.AudioFile(tmpfile.name) as source:
+                audio_data = recognizer.record(source)
+                try:
+                    text = recognizer.recognize_google(audio_data)
+                    st.success(f"You said: {text}")
+                except sr.UnknownValueError:
+                    st.error("Sorry, I could not understand the audio.")
+                except sr.RequestError as e:
+                    st.error(f"Could not request results; {e}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
 elif selected == "Image Recognition":
     st.header("Image Recognition")
-    st.write("Upload an image and the app will try to recognize what is in the image.")
-    uploaded_file = st.file_uploader("Choose an image for recognition...", type=["jpg", "jpeg", "png"])
-    if uploaded_file is not None:
-        from PIL import Image
-        import torch
-        import torchvision.transforms as transforms
-        import torchvision.models as models
-        image = Image.open(uploaded_file).convert('RGB')
-        st.image(image, caption="Uploaded Image", use_column_width=True)
-        st.write("Recognizing...")
-        # Preprocess
-        preprocess = transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-        input_tensor = preprocess(image).unsqueeze(0)
-        # Load model
-        model = models.resnet50(pretrained=True)
-        model.eval()
-        with torch.no_grad():
-            output = model(input_tensor)
-            probabilities = torch.nn.functional.softmax(output[0], dim=0)
-        # Load labels
-        import json
-        import urllib.request
-        LABELS_URL = "https://raw.githubusercontent.com/pytorch/hub/master/imagenet_classes.txt"
-        with urllib.request.urlopen(LABELS_URL) as f:
-            categories = [line.strip() for line in f.readlines()]
-        # Show top 3
-        top3_prob, top3_catid = torch.topk(probabilities, 3)
-        for i in range(top3_prob.size(0)):
-            st.write(f"{categories[top3_catid[i]].decode('utf-8')}: {top3_prob[i].item()*100:.2f}%")
+    st.write("Upload two images. The app will check if the second image is present in the first image using template matching.")
+    uploaded_file1 = st.file_uploader("Choose the main image...", type=["jpg", "jpeg", "png"], key="main_img")
+    uploaded_file2 = st.file_uploader("Choose the template image...", type=["jpg", "jpeg", "png"], key="template_img")
+    if uploaded_file1 is not None and uploaded_file2 is not None:
+        main_image = Image.open(uploaded_file1).convert('RGB')
+        template_image = Image.open(uploaded_file2).convert('RGB')
+        main_np = np.array(main_image)
+        template_np = np.array(template_image)
+        main_gray = cv2.cvtColor(main_np, cv2.COLOR_RGB2GRAY)
+        template_gray = cv2.cvtColor(template_np, cv2.COLOR_RGB2GRAY)
+        # Resize template if it's larger than main image
+        if template_gray.shape[0] > main_gray.shape[0] or template_gray.shape[1] > main_gray.shape[1]:
+            st.error("Template image is larger than the main image. Please upload a smaller template.")
+        else:
+            res = cv2.matchTemplate(main_gray, template_gray, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+            threshold = 0.6  # Lowered threshold for more realistic matching
+            found = max_val >= threshold
+            h, w = template_gray.shape
+            result_img = main_np.copy()
+            if found:
+                top_left = max_loc
+                bottom_right = (top_left[0] + w, top_left[1] + h)
+                cv2.rectangle(result_img, top_left, bottom_right, (0,255,0), 3)
+                st.success(f"Template found in main image! Match confidence: {max_val*100:.2f}%")
+            else:
+                st.error(f"Template NOT found in main image. Best match confidence: {max_val*100:.2f}%")
+            st.image([main_image, template_image], caption=["Main Image", "Template Image"], use_container_width=True)
+            st.image(result_img, caption="Result (Green box = match)", use_container_width=True)
